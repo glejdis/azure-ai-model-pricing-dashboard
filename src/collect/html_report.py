@@ -252,7 +252,7 @@ def generate_html_report(
     <div id="table-top20"></div>
   </div>
   <div class="panel">
-    <h3>Model Usage Breakdown (Subscription + AI Resource Type)</h3>
+    <h3>Model Usage Breakdown (Subscription + Model + Token Type)</h3>
     <div id="table-models"></div>
   </div>
 
@@ -397,7 +397,7 @@ def generate_html_report(
 
       const modelMap = new Map();
       for (const r of filtered) {{
-        const k = `${{r.subscription_id}}||${{r.ai_resource_type}}||${{r.product_name}}`;
+        const k = `${{r.subscription_id}}||${{r.product_name}}||${{r.token_type}}`;
         if (!modelMap.has(k)) modelMap.set(k, {{tokens: 0, cost: 0}});
         const cur = modelMap.get(k);
         cur.tokens += Number(r.total_quantity) || 0;
@@ -405,17 +405,17 @@ def generate_html_report(
       }}
       const modelRows = [...modelMap.entries()]
         .map(([k, v]) => {{
-          const [sub, rt, model] = k.split("||");
+          const [sub, model, tt] = k.split("||");
           return {{
             cost: Number(v.cost) || 0,
-            cells: [sub, rt, model, fmtInt(v.tokens), fmt2(v.cost), CURRENCY]
+            cells: [sub, model, tt, fmtInt(v.tokens), fmt2(v.cost), CURRENCY]
           }};
         }})
         .sort((a, b) => b.cost - a.cost)
         .map(x => x.cells);
       renderTable(
         "table-models",
-        ["Subscription", "AI Resource Type", "Model", "Total Tokens", "Total Cost", "Currency"],
+        ["Subscription", "Model", "Token Type", "Total Tokens", "Total Cost", "Currency"],
         modelRows
       );
     }}

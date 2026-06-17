@@ -179,6 +179,42 @@ The report includes filters for:
 It also surfaces KPI cards for cached, input, and output token volumes, and
 aggregates model usage across the selected filters.
 
+#### Viewing input / output / cached tokens and cost per model
+
+The collector splits Azure OpenAI usage into token types based on the billing
+meter name and stores them in a `token_type` column alongside `product_name`
+(the model), `total_quantity` (tokens), and `total_cost`. To see the breakdown:
+
+1. **In the HTML report** — open it and look at:
+   - The **KPI cards**: *Cached Input Tokens*, *Input Tokens*, and *Output Tokens*
+     (these update as you change filters).
+   - The **Token type** filter dropdown — select `Cached Input Tokens`,
+     `Input Tokens`, or `Output Tokens` to scope every chart/table.
+   - The **Model Usage Breakdown** table — one row per *Subscription × Model ×
+     Token Type*, showing **Total Tokens** and **Total Cost**. This is where you
+     read cached vs. input vs. output tokens *and* their cost for each model.
+   - The **Top 20 Meters** table — the raw per-meter rows with effective/PAYG
+     prices and discount %.
+
+2. **In the terminal** — `python -m src.collect.cli validate --file <parquet>`
+   prints a summary table with dedicated **Cached Input**, **Input**, and
+   **Output** token columns per subscription.
+
+3. **Programmatically** — read the normalized parquet directly:
+
+   ```python
+   import pandas as pd
+
+   df = pd.read_parquet("data/normalized/openai_cost_last_month.parquet")
+   # Tokens and cost per model and token type:
+   breakdown = (
+       df.groupby(["product_name", "token_type"])[["total_quantity", "total_cost"]]
+         .sum()
+         .reset_index()
+   )
+   print(breakdown)
+   ```
+
 > **Note on cached tokens:** Azure bills cached prompt tokens under a dedicated
 > meter (its name contains `cached`) at a discounted rate. The collector
 > classifies each Cost Details row into a `token_type` by matching the meter
