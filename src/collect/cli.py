@@ -250,6 +250,9 @@ def _print_summary(df: pd.DataFrame) -> None:
     table.add_column("Subscription", style="cyan")
     table.add_column("Rows", justify="right")
     table.add_column("Total Tokens", justify="right")
+    table.add_column("Cached Input", justify="right")
+    table.add_column("Input", justify="right")
+    table.add_column("Output", justify="right")
     table.add_column("Total Cost", justify="right")
     table.add_column("Avg Eff. Price / 1M", justify="right")
 
@@ -261,6 +264,11 @@ def _print_summary(df: pd.DataFrame) -> None:
         else "avg_effective_price"
     )
     sub_col = "subscription_id" if "subscription_id" in df.columns else None
+
+    def _tokens_for_type(grp: pd.DataFrame, token_type: str) -> float:
+        if "token_type" not in grp.columns or qty_col not in grp.columns:
+            return 0.0
+        return float(grp.loc[grp["token_type"] == token_type, qty_col].sum())
 
     if sub_col:
         for sub_id, grp in df.groupby(sub_col):
@@ -282,6 +290,9 @@ def _print_summary(df: pd.DataFrame) -> None:
                 str(sub_id)[:40],
                 f"{len(grp):,}",
                 f"{total_qty:,.0f}",
+                f"{_tokens_for_type(grp, 'Cached Input Tokens'):,.0f}",
+                f"{_tokens_for_type(grp, 'Input Tokens'):,.0f}",
+                f"{_tokens_for_type(grp, 'Output Tokens'):,.0f}",
                 f"{total_cost:,.4f} {currency}",
                 f"{avg_eff:,.6f}",
             )
@@ -290,6 +301,9 @@ def _print_summary(df: pd.DataFrame) -> None:
             "all",
             f"{len(df):,}",
             f"{df[qty_col].sum():,.0f}" if qty_col in df.columns else "n/a",
+            f"{_tokens_for_type(df, 'Cached Input Tokens'):,.0f}",
+            f"{_tokens_for_type(df, 'Input Tokens'):,.0f}",
+            f"{_tokens_for_type(df, 'Output Tokens'):,.0f}",
             f"{df[cost_col].sum():,.4f}" if cost_col in df.columns else "n/a",
             "n/a",
         )

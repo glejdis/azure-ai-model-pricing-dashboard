@@ -31,6 +31,7 @@ CANONICAL_COLUMNS = [
     "service_tier",
     "product_name",
     "meter_name",
+    "token_type",
     "quantity",
     "unit_price",
     "effective_price",
@@ -39,6 +40,57 @@ CANONICAL_COLUMNS = [
     "currency",
     "additional_info",
 ]
+
+# ---------------------------------------------------------------------------
+# Token type classification
+# ---------------------------------------------------------------------------
+# Azure OpenAI / Foundry bills cached prompt tokens under a dedicated meter
+# (whose name contains "cached") at a discounted rate.  These must be separated
+# from regular input tokens, so "cached" is checked *before* "input"/"prompt"
+# below (cached meters are typically named e.g. "Cached Input Tokens").
+
+TOKEN_TYPE_CACHED = "Cached Input Tokens"
+TOKEN_TYPE_INPUT = "Input Tokens"
+TOKEN_TYPE_OUTPUT = "Output Tokens"
+TOKEN_TYPE_PTU = "PTU"
+TOKEN_TYPE_IMAGE = "Image"
+
+
+def classify_token_type(meter_name: str | None) -> str:
+    """Classify a Cost Details meter name into a token / usage category.
+
+    Returns one of: ``"Cached Input Tokens"``, ``"Input Tokens"``,
+    ``"Output Tokens"``, ``"PTU"``, ``"Image"``, ``"Other"`` or ``"Unknown"``.
+
+    The ordering is significant: cached-token meters often contain both
+    ``"cached"`` and ``"input"`` (e.g. "Cached Input Tokens"), so ``"cached"``
+    must be matched first to avoid them being counted as plain input tokens.
+    """
+    low = (meter_name or "").lower()
+    if not low:
+        return "Unknown"
+    if "cached" in low or "cache" in low:
+        return TOKEN_TYPE_CACHED
+    if "prompt" in low or "input" in low:
+        return TOKEN_TYPE_INPUT
+    if "completion" in low or "output" in low:
+        return TOKEN_TYPE_OUTPUT
+    if "ptu" in low or "provisioned" in low:
+        return TOKEN_TYPE_PTU
+    if "image" in low or "dall" in low:
+        return TOKEN_TYPE_IMAGE
+    return "Other"
+
+
+def add_token_type(df: pd.DataFrame) -> pd.DataFrame:
+    """Add a ``token_type`` column derived from ``meter_name`` (in place)."""
+    if df.empty:
+        return df
+    if "meter_name" in df.columns:
+        df["token_type"] = df["meter_name"].map(classify_token_type)
+    else:
+        df["token_type"] = "Unknown"
+    return df
 
 # Mapping from common raw column names → canonical names.
 # The keys are lower-cased and stripped; values are canonical names.
@@ -427,4 +479,5 @@ def normalize_dataframe(
     df = coerce_numeric(df)
     df = add_derived_columns(df, retail_prices=retail_prices)
     df = aggregate_by_subscription_meter(df)
+    df = add_token_type(df)
     return df

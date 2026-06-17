@@ -12,6 +12,7 @@ import pytest
 from src.collect.normalize import (
     COLUMN_ALIASES,
     add_derived_columns,
+    classify_token_type,
     coerce_numeric,
     filter_openai_rows,
     normalize_columns,
@@ -318,3 +319,57 @@ class TestNormalizeDataframe:
         assert "discount_pct" in result.columns
         # All rows have payg_price > effective_price → positive discount
         assert (result["discount_pct"] >= 0).all()
+
+
+# ---------------------------------------------------------------------------
+# Token type classification (cached / input / output)
+# ---------------------------------------------------------------------------
+
+class TestClassifyTokenType:
+    def test_cached_input_detected(self) -> None:
+        # "cached" must win over "input" since the name contains both.
+        assert classify_token_type("Cached Input Tokens") == "Cached Input Tokens"
+        assert classify_token_type("gpt 4o cached Inp glbl Tokens") == "Cached Input Tokens"
+        assert classify_token_type("Input Cached Tokens") == "Cached Input Tokens"
+
+    def test_input_detected(self) -> None:
+        assert classify_token_type("Azure OpenAI Prompt Tokens") == "Input Tokens"
+        assert classify_token_type("gpt 4o Input global Tokens") == "Input Tokens"
+
+    def test_output_detected(self) -> None:
+        assert classify_token_type("Azure OpenAI Completion Tokens") == "Output Tokens"
+        assert classify_token_type("gpt 4o Output global Tokens") == "Output Tokens"
+
+    def test_other_categories(self) -> None:
+        assert classify_token_type("gpt 4o PTU") == "PTU"
+        assert classify_token_type("DALL-E Images") == "Image"
+        assert classify_token_type("Some Random Meter") == "Other"
+
+    def test_empty_or_none(self) -> None:
+        assert classify_token_type("") == "Unknown"
+        assert classify_token_type(None) == "Unknown"
+
+
+class TestTokenTypeInPipeline:
+    def test_normalize_adds_token_type_with_cached(self) -> None:
+        df = make_df(
+            SubscriptionId=["sub-1", "sub-1", "sub-1"],
+            Date=["2024-04-01", "2024-04-01", "2024-04-01"],
+            MeterName=[
+                "Azure OpenAI Prompt Tokens",
+                "Azure OpenAI Completion Tokens",
+                "Azure OpenAI Cached Input Tokens",
+            ],
+            ServiceTier=["Azure OpenAI", "Azure OpenAI", "Azure OpenAI"],
+            ProductName=["Azure OpenAI", "Azure OpenAI", "Azure OpenAI"],
+            Quantity=["1000", "500", "800"],
+            EffectivePrice=["0.001", "0.002", "0.0005"],
+            Cost=["1.0", "1.0", "0.4"],
+            BillingCurrencyCode=["USD", "USD", "USD"],
+        )
+        result = normalize_dataframe(df)
+        assert "token_type" in result.columns
+        types = set(result["token_type"].tolist())
+        assert "Cached Input Tokens" in types
+        assert "Input Tokens" in types
+        assert "Output Tokens" in types

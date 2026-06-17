@@ -12,6 +12,8 @@ from pathlib import Path
 import pandas as pd
 from plotly.offline.offline import get_plotlyjs
 
+from src.collect.normalize import classify_token_type
+
 
 def _coerce_columns(df: pd.DataFrame) -> pd.DataFrame:
     for col in (
@@ -43,7 +45,9 @@ def _derive_ai_resource_type(df: pd.DataFrame) -> pd.Series:
         meter_l = meter.str.lower()
         labels = []
         for raw, low in zip(meter.tolist(), meter_l.tolist()):
-            if "prompt" in low or "input" in low:
+            if "cached" in low or "cache" in low:
+                labels.append("Cached Input Tokens")
+            elif "prompt" in low or "input" in low:
                 labels.append("Input Tokens")
             elif "completion" in low or "output" in low:
                 labels.append("Output Tokens")
@@ -75,12 +79,16 @@ def _records_for_json(df: pd.DataFrame) -> list[dict]:
     rows: list[dict] = []
     for _, row in df.iterrows():
         dt = row.get("date")
+        token_type = row.get("token_type")
+        if not token_type:
+            token_type = classify_token_type(str(row.get(meter_col, "") or ""))
         rows.append(
             {
                 "subscription_id": str(row.get(sub_col, "") or ""),
                 "meter_name": str(row.get(meter_col, "") or ""),
                 "product_name": str(row.get(model_col, "") or ""),
                 "ai_resource_type": str(row.get("ai_resource_type", "") or ""),
+                "token_type": str(token_type or "Unknown"),
                 "date": dt.strftime("%Y-%m-%d") if pd.notna(dt) else "",
                 "total_quantity": float(row.get(qty_col, 0.0) or 0.0),
                 "total_cost": float(row.get(cost_col, 0.0) or 0.0),
@@ -115,6 +123,7 @@ def generate_html_report(
     records = _records_for_json(df)
     subs = sorted({r["subscription_id"] for r in records if r["subscription_id"]})
     resource_types = sorted({r["ai_resource_type"] for r in records if r["ai_resource_type"]})
+    token_types = sorted({r["token_type"] for r in records if r["token_type"]})
     currency = next((r["currency"] for r in records if r["currency"]), "")
     title_html = html.escape(title, quote=True)
     sub_options = "".join(
@@ -124,6 +133,10 @@ def generate_html_report(
     resource_options = "".join(
         f'<option value="{html.escape(r, quote=True)}">{html.escape(r, quote=True)}</option>'
         for r in resource_types
+    )
+    token_options = "".join(
+        f'<option value="{html.escape(t, quote=True)}">{html.escape(t, quote=True)}</option>'
+        for t in token_types
     )
     data_json_b64 = base64.b64encode(
         json.dumps(records, ensure_ascii=True).encode("utf-8")
@@ -207,10 +220,20 @@ def generate_html_report(
         {resource_options}
       </select>
     </label>
+    <label>
+      Token type
+      <select id="token-filter">
+        <option value="__all__">All token types</option>
+        {token_options}
+      </select>
+    </label>
   </div>
 
   <div class="card-grid">
     <div class="card"><p class="label">Total Tokens</p><p class="value" id="kpi-tokens">0</p></div>
+    <div class="card"><p class="label">Cached Input Tokens</p><p class="value" id="kpi-cached">0</p></div>
+    <div class="card"><p class="label">Input Tokens</p><p class="value" id="kpi-input">0</p></div>
+    <div class="card"><p class="label">Output Tokens</p><p class="value" id="kpi-output">0</p></div>
     <div class="card"><p class="label">Total Cost</p><p class="value" id="kpi-cost">0</p></div>
     <div class="card"><p class="label">Avg Eff. Price / 1M</p><p class="value" id="kpi-eff">0</p></div>
     <div class="card"><p class="label">Avg Discount %</p><p class="value" id="kpi-disc">0</p></div>
@@ -241,6 +264,7 @@ def generate_html_report(
     const CURRENCY = {currency_json};
     const subFilter = document.getElementById("subscription-filter");
     const resourceFilter = document.getElementById("resource-filter");
+    const tokenFilter = document.getElementById("token-filter");
 
     const INT_FMT = new Intl.NumberFormat();
     const FMT_2 = new Intl.NumberFormat(undefined, {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
@@ -254,9 +278,11 @@ def generate_html_report(
     function applyFilters(rows) {{
       const s = subFilter.value;
       const r = resourceFilter.value;
+      const t = tokenFilter.value;
       return rows.filter(x =>
         (s === "__all__" || x.subscription_id === s) &&
-        (r === "__all__" || x.ai_resource_type === r)
+        (r === "__all__" || x.ai_resource_type === r) &&
+        (t === "__all__" || x.token_type === t)
       );
     }}
 
@@ -300,7 +326,15 @@ def generate_html_report(
       const avgEff = tokens > 0 ? weightedEff / tokens : 0;
       const avgDisc = filtered.length ? filtered.reduce((a, b) => a + (Number(b.discount_pct) || 0), 0) / filtered.length : 0;
 
+      const tokensByType = (type) => filtered.reduce(
+        (a, b) => a + (b.token_type === type ? (Number(b.total_quantity) || 0) : 0),
+        0
+      );
+
       document.getElementById("kpi-tokens").textContent = fmtInt(tokens);
+      document.getElementById("kpi-cached").textContent = fmtInt(tokensByType("Cached Input Tokens"));
+      document.getElementById("kpi-input").textContent = fmtInt(tokensByType("Input Tokens"));
+      document.getElementById("kpi-output").textContent = fmtInt(tokensByType("Output Tokens"));
       document.getElementById("kpi-cost").textContent = `${{fmt2(cost)}} ${{CURRENCY}}`;
       document.getElementById("kpi-eff").textContent = `${{fmt4(avgEff)}} ${{CURRENCY}}`;
       document.getElementById("kpi-disc").textContent = `${{fmt2(avgDisc)}}%`;
@@ -388,6 +422,7 @@ def generate_html_report(
 
     subFilter.addEventListener("change", rerender);
     resourceFilter.addEventListener("change", rerender);
+    tokenFilter.addEventListener("change", rerender);
     rerender();
   </script>
 </body>

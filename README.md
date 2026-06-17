@@ -7,6 +7,7 @@ A production-ready Python 3.11 project that builds an **Azure OpenAI cost report
 ## Features
 
 - Retrieves Azure OpenAI / Foundry token usage via the **Cost Management Generate Cost Details Report** async API (`2024-08-01`)
+- Breaks usage down by **token type** — cached input, input (prompt), and output (completion) — derived from the billing meter names
 - Shows effective (discounted) unit prices, discount vs. PAYG list price, and PTU/token breakdown
 - Aggregates data across all accessible Azure subscriptions automatically
 - Self-contained HTML report with filters, KPIs, and interactive charts
@@ -173,8 +174,17 @@ Open `data/reports/openai_cost_report.html` in any browser and share it as a sin
 The report includes filters for:
 - Subscription
 - AI resource type
+- Token type (cached input / input / output)
 
-It also aggregates model usage across the selected filters.
+It also surfaces KPI cards for cached, input, and output token volumes, and
+aggregates model usage across the selected filters.
+
+> **Note on cached tokens:** Azure bills cached prompt tokens under a dedicated
+> meter (its name contains `cached`) at a discounted rate. The collector
+> classifies each Cost Details row into a `token_type` by matching the meter
+> name — checking `cached` *before* `input`/`output` so cached usage is reported
+> separately rather than folded into regular input tokens. Cached meters only
+> appear when caching actually occurred on a model/deployment that supports it.
 
 ---
 
